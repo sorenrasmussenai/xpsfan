@@ -1,0 +1,10 @@
+[Unit]
+Description=XPS fan control
+Conflicts=i8kmon.service
+
+[Service]
+ExecStart=/usr/local/bin/xpsfan
+ExecStop=/usr/local/bin/dell-bios-fan-control 1
+
+[Install]
+WantedBy=multi-user.target

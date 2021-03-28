@@ -1,0 +1,122 @@
+#!/usr/bin/env python3
+import subprocess
+import time
+from types import SimpleNamespace
+from pathlib import Path
+import json
+import math
+
+
+def get_gpu_temp():
+    gpu_ret = subprocess.run(['nvidia-smi', '--query-gpu=temperature.gpu', '--format=csv,noheader,nounits'],   stdout=subprocess.PIPE)
+    if gpu_ret.returncode == 0:
+        return int(gpu_ret.stdout)
+    else:
+        raise RuntimeError("Unable to get nvidia GPU temp from nvidia-smi.")
+
+def i8kctl(param, *args, fun=int):
+    call = ['i8kctl', param] + [str(a) for a in args]
+    res = subprocess.run(call, stdout=subprocess.PIPE)
+    if res.returncode != 0:
+        raise RuntimeError(f" Call to `i8kctl {param} {args}` failed.")
+    else:
+        res = res.stdout.decode('utf-8').strip("\n").split(" ")
+        if fun is not None:
+            res = [fun(r) for r in res]
+            if len(res) == 1: res = res[0]
+        return res
+
+def get_cpu_temp(): return i8kctl("temp")
+
+def get_fans(): return i8kctl("fan")
+
+def set_fans(cpu=None, gpu=None):
+    if cpu is None: cpu = '-'
+    if gpu is None: gpu = '-'
+    cpu, gpu = str(cpu), str(gpu)
+    i8kctl("fan", gpu, cpu)
+
+
+#class BiosFanControlDisabled():
+#    def __enter__(self):
+#        set_bios_fan_control(True)
+#    def __exit__(self, *args, **kwargs):
+#        self.__del__()
+#    def __del__(self):
+#        set_bios_fan_control(False)
+
+
+
+def set_bios_fan_control(enabled):
+    gpu_ret = subprocess.run(['dell-bios-fan-control', str(int(enabled))], stdout=subprocess.PIPE)
+    if gpu_ret.returncode == 0:
+        return enabled
+    else:
+        raise RuntimeError("Unable to set BIOS fan control.")
+
+class FanReductionHysteresis():
+    def __init__(self, T):
+        self.T = T
+        self.t = -math.inf
+
+    def __call__(self, new, current):
+        dt = time.time() - self.t
+        if (new < current) and  (dt < self.T):
+            new = current
+        elif new > current:
+            self.t = time.time()
+        return new
+
+
+
+class Statemachine():
+    def __init__(self, cfg):
+        self.cfg = cfg
+
+    def __get_state(self, temp, current):
+        if current is not None and (current['low'] <= temp <= current['high']):
+            return current
+        else:
+            for state in self.cfg.states:
+                if (state['low'] <= temp <= state['high']):
+                    return state
+            else:
+                raise RuntimeError('Measured temperature out of config range.')
+    
+    def __distribute_fans(self, fans, cpu_temp, gpu_temp):
+        fan_speeds = [0, 0]
+        start = int(gpu_temp > cpu_temp)
+        for i in range(fans):
+            fan_speeds[(start+i) % 2] += 1
+        return {'cpu': fan_speeds[0], 'gpu': fan_speeds[1]}
+
+    def run(self):
+        try:
+            cpu_hyst = FanReductionHysteresis(self.cfg.min_time_before_reduce)
+            gpu_hyst = FanReductionHysteresis(self.cfg.min_time_before_reduce)
+            state = None
+            while True:
+                t0 = time.time()
+                cpu_temp, gpu_temp = get_cpu_temp(), get_gpu_temp()
+                max_temp = max(cpu_temp, gpu_temp)
+                state = self.__get_state(max_temp, state)
+                set_bios_fan_control(enabled=state['bios'])
+                fan_speeds_req = self.__distribute_fans(state['fans'], cpu_temp, gpu_temp)
+                req_gpu, req_cpu = fan_speeds_req['gpu'], fan_speeds_req['cpu']
+                cur_gpu, cur_cpu = get_fans()
+                new_gpu, new_cpu = gpu_hyst(req_gpu, cur_gpu), cpu_hyst(req_cpu, cur_cpu)
+                set_fans(cpu=new_cpu, gpu=new_gpu)
+                print(cpu_temp, gpu_temp, state, new_cpu, new_gpu)
+                T = time.time() - t0
+                time.sleep(max(0, self.cfg.rate - T))
+        except Exception as inst:
+            raise inst
+        finally:
+            set_bios_fan_control(enabled=True)
+
+if __name__ == "__main__":
+    cfg_file = Path("/etc/xpsfan.conf")
+    if not cfg_file.exists(): raise RuntimeError(f"Config file {cfg_file} not found.")
+    cfg = SimpleNamespace(**json.loads(cfg_file.read_text()))
+    sm = Statemachine(cfg)
+    sm.run()

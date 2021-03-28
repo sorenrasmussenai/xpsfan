@@ -1,0 +1,17 @@
+#!/bin/bash
+if [ "$EUID" -ne 0 ] 
+  then echo "Please run as root."
+  exit
+fi
+
+rm /etc/xpsfan.conf
+rm /usr/local/bin/xpsfan
+
+service xpsfan stop
+systemctl disable xpsfan
+rm /etc/systemd/system/xpsfan.service
+
+rm /etc/modprobe.d/xpsfan.conf   
+rm  /etc/modules-load.d/xpsfan.conf
+
+echo "Done."

@@ -1,0 +1,38 @@
+#!/bin/bash
+if [ "$EUID" -ne 0 ]
+  then echo "Please run as root."
+  exit
+fi
+#set -e
+
+if ! command -v nvidia-smi &> /dev/null
+then
+    echo "Error: nvidia-smi not found."
+    exit
+fi
+
+if ! command -v nvidia-smi &> /dev/null
+then
+    echo "Error: i8kctl not found. Installing i8kutils..."
+    apt-get install i8kutils
+fi
+
+cp xpsfan.conf /etc/xpsfan.conf
+chmod 644 /etc/xpsfan.conf
+chown root:root /etc/xpsfan.conf
+
+cp xpsfan /usr/local/bin/xpsfan
+chmod 744 /usr/local/bin/xpsfan
+chown root:root /usr/local/bin/xpsfan
+
+cp xpsfan.service /etc/systemd/system/xpsfan.service
+chmod 644 /etc/systemd/system/xpsfan.service
+
+echo "options dell-smm-hwmon restricted=0 force=1" > /etc/modprobe.d/xpsfan.conf
+echo "dell-smm-hwmon" >  /etc/modules-load.d/xpsfan.conf
+
+modprobe dell-smm-hwmon restricted=0 force=1
+
+systemctl enable xpsfan
+service xpsfan restart
+echo "Done"
