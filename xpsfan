@@ -26,7 +26,19 @@ def i8kctl(param, *args, fun=int):
             if len(res) == 1: res = res[0]
         return res
 
-def get_cpu_temp(): return i8kctl("temp")
+#def get_cpu_temp(): return i8kctl("temp")
+
+def get_cpu_temp():
+    sensor = 'coretemp-isa-0000'
+    cpu_ret = subprocess.run(['sensors', sensor, '-j'], stdout=subprocess.PIPE)
+    if cpu_ret.returncode == 0:
+        cpu_ret = json.loads(cpu_ret.stdout)[sensor]
+        temps = [v for d in cpu_ret.values() if isinstance(d, dict) for k,v in d.items() if k.startswith("temp") and k.endswith("_input")]
+        return max(temps)
+    else:
+        raise RuntimeError("Unable to get nvidia GPU temp from nvidia-smi.")
+
+
 
 def get_fans(): return i8kctl("fan")
 

@@ -7,13 +7,20 @@ fi
 
 if ! command -v nvidia-smi &> /dev/null
 then
-    echo "Error: nvidia-smi not found."
+    echo "Error: command `nvidia-smi` not found. Please install the nVidia driver manually."
     exit
 fi
 
+if ! command -v sensors &> /dev/null
+then
+    echo "Error: command `sensors` not found. Installing lm-sensors..."
+    apt-get install lm-sensors
+fi
+
+
 if ! command -v nvidia-smi &> /dev/null
 then
-    echo "Error: i8kctl not found. Installing i8kutils..."
+    echo "Error: command `i8kctl` not found. Installing i8kutils..."
     apt-get install i8kutils
 fi
 
