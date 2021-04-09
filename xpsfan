@@ -33,8 +33,9 @@ def get_cpu_temp():
     cpu_ret = subprocess.run(['sensors', sensor, '-j'], stdout=subprocess.PIPE)
     if cpu_ret.returncode == 0:
         cpu_ret = json.loads(cpu_ret.stdout)[sensor]
-        temps = [v for d in cpu_ret.values() if isinstance(d, dict) for k,v in d.items() if k.startswith("temp") and k.endswith("_input")]
-        return max(temps)
+        #temps = [v for d in cpu_ret.values() if isinstance(d, dict) for k,v in d.items() if k.startswith("temp") and k.endswith("_input")]
+        #return max(temps)
+        return cpu_ret['Package id 0']['temp1_input']
     else:
         raise RuntimeError("Unable to get nvidia GPU temp from nvidia-smi.")
 
@@ -106,6 +107,7 @@ class Statemachine():
         try:
             cpu_hyst = FanReductionHysteresis(self.cfg.min_time_before_reduce)
             gpu_hyst = FanReductionHysteresis(self.cfg.min_time_before_reduce)
+            fans_hyst = FanReductionHysteresis(self.cfg.min_time_before_reduce)
             state = None
             while True:
                 t0 = time.time()
@@ -113,12 +115,14 @@ class Statemachine():
                 max_temp = max(cpu_temp, gpu_temp)
                 state = self.__get_state(max_temp, state)
                 set_bios_fan_control(enabled=state['bios'])
-                fan_speeds_req = self.__distribute_fans(state['fans'], cpu_temp, gpu_temp)
-                req_gpu, req_cpu = fan_speeds_req['gpu'], fan_speeds_req['cpu']
                 cur_gpu, cur_cpu = get_fans()
-                new_gpu, new_cpu = gpu_hyst(req_gpu, cur_gpu), cpu_hyst(req_cpu, cur_cpu)
-                set_fans(cpu=new_cpu, gpu=new_gpu)
-                print(cpu_temp, gpu_temp, state, new_cpu, new_gpu)
+                n_fans_cur = cur_gpu + cur_cpu
+                n_fans = fans_hyst(state['fans'], n_fans_cur)
+                fan_speeds_req = self.__distribute_fans(n_fans, cpu_temp, gpu_temp)
+                req_gpu, req_cpu = fan_speeds_req['gpu'], fan_speeds_req['cpu']
+                set_fans(cpu=req_cpu, gpu=req_gpu)
+                if self.cfg.verbose:
+                    print(cpu_temp, gpu_temp, state, req_cpu, req_gpu)
                 T = time.time() - t0
                 time.sleep(max(0, self.cfg.rate - T))
         except Exception as inst:
